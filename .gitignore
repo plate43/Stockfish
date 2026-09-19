@@ -1,0 +1,15 @@
+.DS_Store
+.dart_tool/
+
+.packages
+.pub/
+
+.cxx/
+build/
+
+.depend
+*.nnue
+Makefile
+
+# Vendored SF18 networks (see android/CMakeLists.txt)
+!android/nnue/*.nnue
