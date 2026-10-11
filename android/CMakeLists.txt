@@ -26,16 +26,12 @@ else()
   endif()
 endif()
 
-# NNUE networks are vendored in android/nnue (downloaded once from
-# tests.stockfishchess.org / extracted from the official sf_18 release
-# binary) so builds are deterministic and work offline. cmake's
-# file(DOWNLOAD) hangs on the 302 redirect to data.stockfishchess.org
-# anyway (cmake 3.22, HTTP/2).
-# The big network (108919594 bytes) exceeds GitHub's 100 MB per-file limit,
-# so it is stored split in two parts and reassembled here.
-execute_process(
-  COMMAND ${CMAKE_COMMAND} -E cat
-          ${CMAKE_CURRENT_SOURCE_DIR}/nnue/nn-c288c895ea92.nnue.aa
-          ${CMAKE_CURRENT_SOURCE_DIR}/nnue/nn-c288c895ea92.nnue.ab
-  OUTPUT_FILE ${CMAKE_BINARY_DIR}/nn-c288c895ea92.nnue)
+# Small-net-only release build (T0079): the big network (nn-c288c895ea92,
+# 108919594 bytes, stored split as .aa/.ab in android/nnue) is NOT
+# embedded. Three type-level lines (evaluate.h EvalFileDefaultNameBig →
+# small net, network.h NetworkBig → small architecture,
+# nnue_accumulator.h caches.big → small dims) route both NNUE slots onto
+# the small net, so the engine starts, verifies and searches without the
+# big net (evidence: shakhfit work/T0079-smallnet-verify-switch/).
+# Only the small net is copied into the build dir for incbin.
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/nnue/nn-37f18f62d772.nnue DESTINATION ${CMAKE_BINARY_DIR})
