@@ -22,7 +22,7 @@ class Stockfish {
   late StreamSubscription _mainSubscription;
   late StreamSubscription _stdoutSubscription;
 
-  Stockfish._({this.completer}) {
+  Stockfish._({this.completer, Duration? testInitFailureDelay}) {
     _mainSubscription =
         _mainPort.listen((message) => _cleanUp(message is int ? message : 1));
     _stdoutSubscription = _stdoutPort.listen((message) {
@@ -33,13 +33,19 @@ class Stockfish {
         _logger.fine('The stdout isolate sent $message');
       }
     });
-    compute(_spawnIsolates, [_mainPort.sendPort, _stdoutPort.sendPort]).then(
+    compute(_spawnIsolates, <Object?>[
+      _mainPort.sendPort,
+      _stdoutPort.sendPort,
+      testInitFailureDelay,
+    ]).then(
       (success) {
         final state = success ? StockfishState.ready : StockfishState.error;
         _logger.fine('The init isolate reported $state');
-        _state._setValue(state);
-        if (state == StockfishState.ready) {
+        if (success) {
+          _state._setValue(state);
           completer?.complete(this);
+        } else {
+          _cleanUp(1);
         }
       },
       onError: (error) {
@@ -50,6 +56,22 @@ class Stockfish {
   }
 
   static Stockfish? _instance;
+  static Duration? _testInitFailureDelay;
+
+  /// Makes the next initialization report a native failure without starting
+  /// native code. Intended only for integration tests of owner recovery.
+  @visibleForTesting
+  static void failNextInitForTest({
+    Duration delay = Duration.zero,
+  }) {
+    _testInitFailureDelay = delay;
+  }
+
+  static Duration? _takeTestInitFailureDelay() {
+    final delay = _testInitFailureDelay;
+    _testInitFailureDelay = null;
+    return delay;
+  }
 
   /// Creates a C++ engine.
   ///
@@ -60,7 +82,9 @@ class Stockfish {
       throw new StateError('Multiple instances are not supported, yet.');
     }
 
-    _instance = Stockfish._();
+    _instance = Stockfish._(
+      testInitFailureDelay: _takeTestInitFailureDelay(),
+    );
     return _instance!;
   }
 
@@ -155,7 +179,14 @@ void _isolateStdout(SendPort stdoutPort) {
   }
 }
 
-Future<bool> _spawnIsolates(List<SendPort> mainAndStdout) async {
+Future<bool> _spawnIsolates(List<Object?> mainAndStdout) async {
+  final testFailureDelay = mainAndStdout[2] as Duration?;
+  if (testFailureDelay != null) {
+    await Future<void>.delayed(testFailureDelay);
+    _logger.severe('Simulated native initialization failure');
+    return false;
+  }
+
   final initResult = nativeInit();
   if (initResult != 0) {
     _logger.severe('initResult=$initResult');
@@ -163,14 +194,14 @@ Future<bool> _spawnIsolates(List<SendPort> mainAndStdout) async {
   }
 
   try {
-    await Isolate.spawn(_isolateStdout, mainAndStdout[1]);
+    await Isolate.spawn(_isolateStdout, mainAndStdout[1] as SendPort);
   } catch (error) {
     _logger.severe('Failed to spawn stdout isolate: $error');
     return false;
   }
 
   try {
-    await Isolate.spawn(_isolateMain, mainAndStdout[0]);
+    await Isolate.spawn(_isolateMain, mainAndStdout[0] as SendPort);
   } catch (error) {
     _logger.severe('Failed to spawn main isolate: $error');
     return false;
